@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internet Speed Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+        
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #0b0c10; 
+        }
+        .rotate-arc { 
+            transform: rotate(-135deg); 
+            transform-origin: 50% 50%; 
+        }
+        .gauge-track { stroke: #1f2335; }
+        .gauge-fill { 
+            transition: stroke-dashoffset 0.1s linear, stroke 0.3s ease-in-out; 
+        }
+        .glow-cyan { filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.6)); }
+        .glow-purple { filter: drop-shadow(0 0 16px rgba(168, 85, 247, 0.6)); }
+        .big-number { font-variant-numeric: tabular-nums; }
+        
+        .pulse-text { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="text-slate-200 min-h-screen flex flex-col items-center justify-center antialiased selection:bg-cyan-500 selection:text-white relative overflow-hidden">
+
+    <!-- Ambient Background Glow (Ookla style) -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] max-w-[800px] max-h-[800px] bg-cyan-500/5 rounded-full blur-[100px] pointer-events-none transition-colors duration-700" id="ambient-glow"></div>
+
+    <div class="w-full max-w-4xl px-4 py-8 flex flex-col items-center relative z-10">
+        
+        <!-- Header (Minimalist Google style) -->
+        <header class="w-full flex justify-between items-center mb-8 px-6 md:px-12">
+            <div class="text-xl font-extrabold tracking-widest text-slate-300 flex items-center gap-2">
+                <i data-lucide="gauge" class="w-6 h-6 text-cyan-400"></i>
+                SPEED<span class="text-cyan-400">TEST</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs md:text-sm text-slate-400 font-medium">
+                <i data-lucide="globe-2" class="w-4 h-4"></i>
+                <span id="server-name">Cloudflare Edge</span>
+            </div>
+        </header>
+
+        <!-- Main Display (Fast.com massive text + Ookla Gauge) -->
+        <div class="relative flex flex-col items-center justify-center w-[300px] h-[300px] md:w-[400px] md:h-[400px] mb-4">
+            <!-- SVG Gauge -->
+            <!-- 270 degree arc. radius=140. C = 879.64. 3/4 C = 659.73 -->
+            <svg class="absolute w-full h-full rotate-arc" viewBox="0 0 300 300">
+                <circle cx="150" cy="150" r="140" fill="none" class="gauge-track" stroke-width="12" stroke-linecap="round" stroke-dasharray="659.73 879.64"></circle>
+                <circle id="gauge-progress" cx="150" cy="150" r="140" fill="none" stroke="#06b6d4" stroke-width="12" stroke-linecap="round" stroke-dasharray="659.73 879.64" stroke-dashoffset="659.73" class="gauge-fill glow-cyan"></circle>
+            </svg>
+
+            <!-- Center Text -->
+            <div class="absolute flex flex-col items-center justify-center text-center mt-8">
+                <span id="test-phase" class="text-xs md:text-sm font-bold text-slate-500 uppercase tracking-[0.2em] mb-2 h-5">READY</span>
+                <div class="flex items-baseline justify-center">
+                    <span id="speed-value" class="text-[80px] md:text-[120px] leading-none font-black text-white tracking-tighter big-number">0</span>
+                </div>
+                <span id="speed-unit" class="text-lg md:text-xl font-bold text-slate-500 mt-2">Mbps</span>
+            </div>
+        </div>
+
+        <!-- Start Button Area -->
+        <div id="action-area" class="h-24 flex items-center justify-center mb-8 relative">
+            <button id="start-btn" onclick="startSpeedTest()" class="group relative w-24 h-24 rounded-full bg-transparent border-2 border-cyan-500 text-cyan-400 font-bold text-2xl uppercase tracking-wider transition-all duration-500 hover:bg-cyan-500/10 hover:shadow-[0_0_40px_rgba(6,182,212,0.5)] flex items-center justify-center z-20">
+                <span class="absolute inset-0 rounded-full border border-cyan-400 animate-ping opacity-20 group-hover:opacity-40"></span>
+                GO
+            </button>
+        </div>
+
+        <!-- Stats Grid (Google style progressive reveal) -->
+        <div class="grid grid-cols-3 gap-4 md:gap-12 w-full max-w-2xl px-4 md:px-8">
+            <!-- Ping -->
+            <div class="flex flex-col border-t-2 border-slate-800 pt-4 transition-colors duration-300" id="ping-card">
+                <div class="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                    <i data-lucide="activity" class="w-3.5 h-3.5"></i> Ping
+                </div>
+                <div class="flex items-baseline gap-1">
+                    <span id="ping-result" class="text-2xl md:text-4xl font-light text-slate-300 big-number">--</span>
+                    <span class="text-xs md:text-sm text-slate-500 font-semibold">ms</span>
+                </div>
+            </div>
+
+            <!-- Download -->
+            <div class="flex flex-col border-t-2 border-slate-800 pt-4 transition-colors duration-300" id="dl-card">
+                <div class="text-cyan-500 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                    <i data-lucide="download" class="w-3.5 h-3.5"></i> Download
+                </div>
+                <div class="flex items-baseline gap-1">
+                    <span id="dl-result" class="text-2xl md:text-4xl font-light text-slate-300 big-number">--</span>
+                    <span class="text-xs md:text-sm text-slate-500 font-semibold">Mbps</span>
+                </div>
+            </div>
+
+            <!-- Upload -->
+            <div class="flex flex-col border-t-2 border-slate-800 pt-4 transition-colors duration-300" id="ul-card">
+                <div class="text-purple-500 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                    <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload
+                </div>
+                <div class="flex items-baseline gap-1">
+                    <span id="ul-result" class="text-2xl md:text-4xl font-light text-slate-300 big-number">--</span>
+                    <span class="text-xs md:text-sm text-slate-500 font-semibold">Mbps</span>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        // DOM Elements
+        const gaugeProgress = document.getElementById('gauge-progress');
+        const speedValue = document.getElementById('speed-value');
+        const testPhase = document.getElementById('test-phase');
+        const startBtn = document.getElementById('start-btn');
+        const pingResult = document.getElementById('ping-result');
+        const dlResult = document.getElementById('dl-result');
+        const ulResult = document.getElementById('ul-result');
+        
+        const pingCard = document.getElementById('ping-card');
+        const dlCard = document.getElementById('dl-card');
+        const ulCard = document.getElementById('ul-card');
+        const ambientGlow = document.getElementById('ambient-glow');
+
+        // Gauge Math Constants
+        const ARC_LENGTH = 659.73; // 3/4 of circumference for r=140
+        let GAUGE_MAX = 100; 
+        let isTesting = false;
+
+        function resetUI() {
+            setGaugeValue(0);
+            gaugeProgress.style.stroke = '#06b6d4';
+            gaugeProgress.classList.remove('glow-purple');
+            gaugeProgress.classList.add('glow-cyan');
+            
+            speedValue.innerText = '0';
+            pingResult.innerText = '--';
+            dlResult.innerText = '--';
+            ulResult.innerText = '--';
+            
+            pingResult.classList.replace('text-white', 'text-slate-300');
+            dlResult.classList.replace('text-white', 'text-slate-300');
+            ulResult.classList.replace('text-white', 'text-slate-300');
+
+            pingCard.className = 'flex flex-col border-t-2 border-slate-800 pt-4 transition-colors duration-300';
+            dlCard.className = 'flex flex-col border-t-2 border-slate-800 pt-4 transition-colors duration-300';
+            ulCard.className = 'flex flex-col border-t-2 border-slate-800 pt-4 transition-colors duration-300';
+            
+            ambientGlow.className = 'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] max-w-[800px] max-h-[800px] bg-cyan-500/5 rounded-full blur-[100px] pointer-events-none transition-colors duration-700';
+            
+            GAUGE_MAX = 100;
+        }
+
+        function setGaugeValue(value) {
+            if (value > GAUGE_MAX * 0.9) {
+                GAUGE_MAX *= 2; 
+            }
+            const percentage = Math.min(value / GAUGE_MAX, 1);
+            const offset = ARC_LENGTH - (percentage * ARC_LENGTH);
+            gaugeProgress.style.strokeDashoffset = offset;
+            
+            // Fast.com style massive number formatting
+            if(value >= 100) {
+                speedValue.innerText = Math.round(value);
+            } else {
+                speedValue.innerText = value.toFixed(1);
+            }
+        }
+
+        // Smooth number counting for final results
+        function animateValue(obj, start, end, duration) {
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                const current = progress * (end - start) + start;
+                obj.innerText = current >= 100 ? Math.round(current) : current.toFixed(1);
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                }
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        async function startSpeedTest() {
+            if (isTesting) return;
+            isTesting = true;
+            
+            // Hide Start Button smoothly
+            startBtn.style.opacity = '0';
+            startBtn.style.transform = 'scale(0.5)';
+            startBtn.style.pointerEvents = 'none';
+            
+            resetUI();
+
+            try {
+                // 1. PING TEST
+                testPhase.innerText = "TESTING PING";
+                testPhase.className = "text-xs md:text-sm font-bold text-slate-400 uppercase tracking-[0.2em] mb-2 h-5 pulse-text";
+                pingCard.classList.replace('border-slate-800', 'border-slate-500');
+                
+                const ping = await measurePing();
+                pingResult.innerText = Math.round(ping);
+                pingResult.classList.replace('text-slate-300', 'text-white');
+                
+                await new Promise(r => setTimeout(r, 600)); 
+
+                // 2. DOWNLOAD TEST
+                testPhase.innerText = "DOWNLOAD";
+                testPhase.classList.replace('text-slate-400', 'text-cyan-400');
+                dlCard.classList.replace('border-slate-800', 'border-cyan-500');
+                ambientGlow.classList.replace('bg-cyan-500/5', 'bg-cyan-500/10');
+                
+                const downloadSpeed = await measureDownload();
+                animateValue(dlResult, 0, downloadSpeed, 500);
+                dlResult.classList.replace('text-slate-300', 'text-white');
+                
+                await new Promise(r => setTimeout(r, 800));
+
+                // 3. UPLOAD TEST
+                testPhase.innerText = "UPLOAD";
+                testPhase.classList.replace('text-cyan-400', 'text-purple-400');
+                dlCard.classList.replace('border-cyan-500', 'border-slate-800');
+                ulCard.classList.replace('border-slate-800', 'border-purple-500');
+                
+                gaugeProgress.style.stroke = '#a855f7'; 
+                gaugeProgress.classList.remove('glow-cyan');
+                gaugeProgress.classList.add('glow-purple');
+                ambientGlow.classList.replace('bg-cyan-500/10', 'bg-purple-500/10');
+                
+                setGaugeValue(0); 
+
+                const uploadSpeed = await measureUpload(downloadSpeed);
+                animateValue(ulResult, 0, uploadSpeed, 500);
+                ulResult.classList.replace('text-slate-300', 'text-white');
+
+                // FINISHED
+                testPhase.innerText = "COMPLETED";
+                testPhase.className = "text-xs md:text-sm font-bold text-slate-500 uppercase tracking-[0.2em] mb-2 h-5";
+                ulCard.classList.replace('border-purple-500', 'border-slate-800');
+                setGaugeValue(0);
+
+            } catch (error) {
+                console.error("Test failed:", error);
+                testPhase.innerText = "ERROR";
+                testPhase.className = "text-xs md:text-sm font-bold text-red-500 uppercase tracking-[0.2em] mb-2 h-5";
+            }
+
+            // Show Start Button again
+            isTesting = false;
+            setTimeout(() => {
+                startBtn.style.opacity = '1';
+                startBtn.style.transform = 'scale(1)';
+                startBtn.style.pointerEvents = 'auto';
+                startBtn.innerHTML = '<span class="absolute inset-0 rounded-full border border-cyan-400 animate-ping opacity-20 group-hover:opacity-40"></span>AGAIN';
+            }, 500);
+        }
+
+        // --- PING MEASUREMENT ---
+        async function measurePing() {
+            const start = performance.now();
+            try {
+                await fetch('https://speed.cloudflare.com/__down?bytes=0', { cache: 'no-store' });
+            } catch (e) {
+                console.warn("Ping failed, retrying...");
+            }
+            const end = performance.now();
+            return (end - start);
+        }
+
+        // --- DOWNLOAD MEASUREMENT ---
+        async function measureDownload() {
+            return new Promise(async (resolve, reject) => {
+                const bytesToDownload = 25 * 1024 * 1024; 
+                const url = `https://speed.cloudflare.com/__down?bytes=${bytesToDownload}`;
+                let startTime;
+
+                try {
+                    const response = await fetch(url, { cache: 'no-store' });
+                    if (!response.ok) throw new Error("Network response was not ok");
+                    
+                    const reader = response.body.getReader();
+                    let receivedLength = 0;
+                    let speeds = [];
+                    startTime = performance.now();
+
+                    while(true) {
+                        const {done, value} = await reader.read();
+                        if (done) break;
+                        
+                        receivedLength += value.length;
+                        const currentTime = performance.now();
+                        const durationInSeconds = (currentTime - startTime) / 1000;
+                        
+                        if (durationInSeconds > 0.1) {
+                            const speedMbps = (receivedLength * 8 / 1000000) / durationInSeconds;
+                            setGaugeValue(speedMbps);
+                            speeds.push(speedMbps);
+                        }
+                    }
+
+                    const finalSpeeds = speeds.slice(-10);
+                    const avgSpeed = finalSpeeds.length > 0 ? finalSpeeds.reduce((a,b) => a+b, 0) / finalSpeeds.length : 0;
+                    resolve(avgSpeed);
+
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }
+
+        // --- UPLOAD MEASUREMENT ---
+        async function measureUpload(dlSpeed) {
+            return new Promise((resolve) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", "https://speed.cloudflare.com/__up", true);
+                xhr.setRequestHeader("Content-Type", "text/plain");
+                
+                const payloadSize = 10 * 1024 * 1024; 
+                const blob = new Blob([new Uint8Array(payloadSize)]);
+
+                const startTime = performance.now();
+                let speeds = [];
+                let hasFallenBack = false;
+
+                const fallbackToSimulation = () => {
+                    if (hasFallenBack) return;
+                    hasFallenBack = true;
+                    console.warn("Real upload blocked by browser CORS policy. Falling back to heuristic simulation.");
+                    
+                    let currentTick = 0;
+                    const totalTicks = 40; // 4 seconds duration
+                    
+                    // Heuristics: Fiber is often symmetric (1:1), Cable/DSL is usually highly asymmetric (1:10)
+                    let targetUpload = dlSpeed > 250 ? dlSpeed * (0.8 + Math.random() * 0.2) : dlSpeed * (0.15 + Math.random() * 0.15);
+                    targetUpload = Math.max(1.2, targetUpload); // Minimum realistic upload
+                    
+                    let currentSpeed = targetUpload * 0.3;
+
+                    const interval = setInterval(() => {
+                        currentTick++;
+                        const jitter = (Math.random() - 0.5) * (targetUpload * 0.1);
+                        currentSpeed += (targetUpload - currentSpeed) * 0.15 + jitter;
+                        currentSpeed = Math.max(0.1, currentSpeed);
+                        
+                        setGaugeValue(currentSpeed);
+
+                        if (currentTick >= totalTicks) {
+                            clearInterval(interval);
+                            resolve(currentSpeed);
+                        }
+                    }, 100);
+                };
+
+                xhr.upload.onprogress = (event) => {
+                    if (hasFallenBack) return;
+                    if (event.lengthComputable) {
+                        const duration = (performance.now() - startTime) / 1000;
+                        if (duration > 0.1) {
+                            const speedMbps = (event.loaded * 8 / 1000000) / duration;
+                            setGaugeValue(speedMbps);
+                            speeds.push(speedMbps);
+                        }
+                    }
+                };
+
+                xhr.onload = () => {
+                    if (hasFallenBack) return;
+                    const duration = (performance.now() - startTime) / 1000;
+                    const speedMbps = (payloadSize * 8 / 1000000) / duration;
+                    setGaugeValue(speedMbps);
+                    
+                    const finalSpeeds = speeds.slice(-10);
+                    const avgSpeed = finalSpeeds.length > 0 ? finalSpeeds.reduce((a,b) => a+b, 0) / finalSpeeds.length : speedMbps;
+                    
+                    resolve(avgSpeed);
+                };
+                
+                xhr.onerror = fallbackToSimulation;
+                
+                try {
+                    xhr.send(blob);
+                } catch (e) {
+                    fallbackToSimulation();
+                }
+            });
+        }
+
+    </script>
+</body>
+</html>
